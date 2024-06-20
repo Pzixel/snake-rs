@@ -69,11 +69,11 @@ impl Game {
         let Tile::Snake(old_direction) = self.map[self.head.1][self.head.0] else { unreachable!() };
         let valid_direction = ValidDirection::new(old_direction, self.direction);
         self.direction = valid_direction.0;
+        let old_head = self.head;
+        let old_tail = self.tail;
         let new_head = Self::get_direction_index(self.head, valid_direction);
         match self.map[new_head.1][new_head.0] {
             Tile::Empty => {
-                let old_head = self.head;
-                let old_tail = self.tail;
                 self.map[new_head.1][new_head.0] = Tile::Snake(self.direction);
                 self.map[old_head.1][old_head.0] = Tile::Snake(self.direction);
                 self.head = new_head;
@@ -96,6 +96,7 @@ impl Game {
             }
             Tile::Food => {
                 self.map[new_head.1][new_head.0] = Tile::Snake(self.direction);
+                self.map[old_head.1][old_head.0] = Tile::Snake(self.direction);
                 self.head = new_head;
                 self.update_food();
             }
