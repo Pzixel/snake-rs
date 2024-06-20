@@ -1,21 +1,29 @@
 use std::{io::stdout, sync::{Arc, Mutex}, thread};
 
 use rand::RngCore;
-use crossterm::{cursor, event::{read, Event, KeyCode, KeyEvent, KeyModifiers}, execute, terminal::enable_raw_mode};
+use crossterm::{cursor, event::{read, Event, KeyCode, KeyEvent, KeyModifiers}, execute, terminal::{disable_raw_mode, enable_raw_mode}};
 
 const N: usize = 16;
 const M: usize = 16;
 
 // snake game
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tile {
+    Empty,
+    Snake(Direction),
+    Food,
+}
+
 struct Game {
-    snake: Vec<(usize, usize)>,
-    food: (usize, usize),
+    map: [[Tile; N]; M],
+    head: (usize, usize),
+    tail: (usize, usize),
     direction: Direction,
     generator: rand::rngs::ThreadRng,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Direction {
     Up,
     Down,
@@ -25,46 +33,98 @@ enum Direction {
 
 impl Game {
     fn new() -> Self {
+        let mut map = [[Tile::Empty; N]; M];
+        let head = (N / 2, M / 2);
+        let tail = head;
+        let direction = Direction::Right;
+        map[head.1][head.0] = Tile::Snake(direction);
+
         let mut result = Self {
-            snake: vec![(N / 2, M / 2)],
-            food: Default::default(),
-            direction: Direction::Right,
+            head,
+            tail,
+            direction,
             generator: rand::thread_rng(),
+            map,
         };
-        result.food = result.next_food_position();
+        result.update_food();
         result
     }
 
-    fn update(&mut self) {
-        let head = self.snake[0];
-        let (dx, dy) = match self.direction {
+    fn update(&mut self) -> Result<(), String> {
+        let new_head = Self::get_direction_index(self.head, self.direction);
+        match self.map[new_head.1][new_head.0] {
+            Tile::Empty => {
+                let old_head = self.head;
+                let old_tail = self.tail;
+                self.map[new_head.1][new_head.0] = Tile::Snake(self.direction);
+                self.map[old_head.1][old_head.0] = Tile::Snake(self.direction);
+                self.head = new_head;
+
+                if old_head == old_tail {
+                    self.tail = new_head;
+                } else {
+                    let Tile::Snake(tail_tile) = self.map[self.tail.1][self.tail.0] else {
+                        return Err(format!("Tail is not a snake: {:?}. Head: {:?}. Tail: {:?}", self.map[self.tail.1][self.tail.0], self.head, self.tail));
+                    };
+
+                    let new_tail = Self::get_direction_index(self.tail, tail_tile);
+                        self.map[self.tail.1][self.tail.0] = Tile::Empty;
+
+                        self.tail = new_tail;
+                }
+
+
+                self.map[old_tail.1][old_tail.0] = Tile::Empty;
+            }
+            Tile::Food => {
+                self.map[new_head.1][new_head.0] = Tile::Snake(self.direction);
+                self.head = new_head;
+                self.update_food();
+            }
+            Tile::Snake(_) => {
+                return Err("Game over".into());
+            }
+        }
+        disable_raw_mode().unwrap();
+        println!("{:?}: {:?} {:?}: {:?}", 
+            self.head, 
+            self.map[self.head.1][self.head.0],
+            self.tail,
+            self.map[self.tail.1][self.tail.0]
+        );
+        enable_raw_mode().unwrap();
+        Ok(())
+    }
+
+    fn get_direction_index(position: (usize, usize), direction: Direction) -> (usize, usize) {
+        let (dx, dy) = match direction {
             Direction::Up => (0, -1),
             Direction::Down => (0, 1),
             Direction::Left => (-1, 0),
             Direction::Right => (1, 0),
         };
-        let new_head = (
-            (head.0 as isize + dx + N as isize) as usize % N,
-            (head.1 as isize + dy + M as isize) as usize % M,
-        );
+        Self::get_bounded_index(position, dx, dy)
+    }
 
-        self.snake.insert(0, new_head);
-        if self.snake[0] == self.food {
-            self.food = self.next_food_position();
-        } else {
-            self.snake.pop();
-        }
+    fn get_bounded_index(position: (usize, usize), dx: isize, dy: isize) -> (usize, usize) {
+        (
+            (position.0 as isize + dx + N as isize) as usize % N,
+            (position.1 as isize + dy + M as isize) as usize % M,
+        )
     }
 
     fn draw(&self) {
         for y in 0..M {
             for x in 0..N {
-                if self.snake.contains(&(x, y)) {
-                    print!("X");
-                } else if (x, y) == self.food {
-                    print!("O");
-                } else {
-                    print!(" ");
+                match self.map[y][x] {
+                    Tile::Empty => print!(" "),
+                    Tile::Snake(x) => match x {
+                        Direction::Up => print!("^"),
+                        Direction::Down => print!("v"),
+                        Direction::Left => print!("<"),
+                        Direction::Right => print!(">"),
+                    },
+                    Tile::Food => print!("*"),
                 }
             }
             execute!(stdout(), cursor::MoveToNextLine(1)).unwrap();
@@ -72,10 +132,15 @@ impl Game {
         execute!(stdout(), cursor::MoveTo(0, 0)).unwrap();
     }
 
+    fn update_food(&mut self) {
+        let (x, y) = self.next_food_position();
+        self.map[y][x] = Tile::Food;
+    }
+
     fn next_food_position(&mut self) -> (usize, usize) {
         let mut x = self.generator.next_u32() as usize % N;
         let mut y = self.generator.next_u32() as usize % M;
-        while self.snake.contains(&(x, y)) {
+        while !matches!(self.map[y][x], Tile::Empty) {
             x = self.generator.next_u32() as usize % N;
             y = self.generator.next_u32() as usize % M;
         }
@@ -83,9 +148,7 @@ impl Game {
     }
 }
 
-fn main() {
-    enable_raw_mode().unwrap();
-
+fn play() -> Result<(), String> {
     let mut game = Game::new();
     let current_direction = Arc::new(Mutex::new(game.direction));
     
@@ -132,9 +195,17 @@ fn main() {
     });
 
     loop {
-        game.draw();
-        game.update();
-        std::thread::sleep(std::time::Duration::from_millis(100));
         game.direction = *current_direction.lock().unwrap();
+        game.draw();
+        game.update()?;
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+fn main() {
+    enable_raw_mode().unwrap();
+    if let Err(e) = play() {
+        disable_raw_mode().unwrap();
+        eprintln!("{}\n\n", e);
     }
 }
