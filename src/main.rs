@@ -31,6 +31,21 @@ enum Direction {
     Right,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct ValidDirection(Direction);
+
+impl ValidDirection {
+    fn new(old_direction: Direction, direction: Direction) -> Self {
+        match (old_direction, direction) {
+            (Direction::Up, Direction::Down) => Self(old_direction),
+            (Direction::Down, Direction::Up) => Self(old_direction),
+            (Direction::Left, Direction::Right) => Self(old_direction),
+            (Direction::Right, Direction::Left) => Self(old_direction),
+            _ => Self(direction),
+        }
+    }
+}
+
 impl Game {
     fn new() -> Self {
         let mut map = [[Tile::Empty; N]; M];
@@ -51,7 +66,10 @@ impl Game {
     }
 
     fn update(&mut self) -> Result<(), String> {
-        let new_head = Self::get_direction_index(self.head, self.direction);
+        let Tile::Snake(old_direction) = self.map[self.head.1][self.head.0] else { unreachable!() };
+        let valid_direction = ValidDirection::new(old_direction, self.direction);
+        self.direction = valid_direction.0;
+        let new_head = Self::get_direction_index(self.head, valid_direction);
         match self.map[new_head.1][new_head.0] {
             Tile::Empty => {
                 let old_head = self.head;
@@ -67,7 +85,7 @@ impl Game {
                         return Err(format!("Tail is not a snake: {:?}. Head: {:?}. Tail: {:?}", self.map[self.tail.1][self.tail.0], self.head, self.tail));
                     };
 
-                    let new_tail = Self::get_direction_index(self.tail, tail_tile);
+                    let new_tail = Self::get_direction_index(self.tail, ValidDirection::new(tail_tile, tail_tile));
                         self.map[self.tail.1][self.tail.0] = Tile::Empty;
 
                         self.tail = new_tail;
@@ -96,7 +114,7 @@ impl Game {
         Ok(())
     }
 
-    fn get_direction_index(position: (usize, usize), direction: Direction) -> (usize, usize) {
+    fn get_direction_index(position: (usize, usize), ValidDirection(direction): ValidDirection) -> (usize, usize) {
         let (dx, dy) = match direction {
             Direction::Up => (0, -1),
             Direction::Down => (0, 1),
